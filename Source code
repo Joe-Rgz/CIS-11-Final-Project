@@ -1,0 +1,413 @@
+; ------------------------------------------------------
+; CIS11 - Course Project Option B: Test Score Calculator
+; Team Members: Lucas Vida, Joseph Rodriguez
+; Reads 5 test scores and displays the minimum, maximum
+; average, and letter grade for each result.
+; Grade Scale: 90-100=A 80-89=B 70-79=C 60-69=D 0-59=F
+; Test Input: 48, 87, 96, 79, 61
+; -------------------------------------------------------
+
+		.ORIG X3000
+
+; ---- Program Entry ----
+
+MAIN	LD 	R6, STACK 			; SET UP STACK POINTER
+	LEA 	R1, SCORES			; R1 POINTS TO START OF SCORES ARRAY
+	ST 	R1, SPTR 			; SAVES POINTER TO MEMORY
+	LD	R2, FIVE
+	ST 	R2, CTR				; LOOP COUNTER = 5
+
+; Read 5 scores from user
+
+INPUT_LOOP	LD	R3, CTR
+		BRnp	IL_BODY			; counter > 0, go read a score
+		BRnzp	INPUT_DONE		; counter = 0, done
+IL_BODY		LEA	R0, PROMPT
+		PUTS
+		JSR	READ_SCORE
+		LD 	R1, SPTR
+		STR 	R0, R1, #0		; STORE SCORE TO POINTER LOCATION
+		ADD	R1, R1, #1		; MOVE POINTER FORWARD
+		ST	R1, SPTR
+		ADD 	R3, R3, #-1
+		ST	R3, CTR
+		BRnzp	INPUT_LOOP
+
+INPUT_DONE	JSR	CALC_STATS
+		JSR	PRINT_RESULTS
+		HALT
+
+
+; ---------------------------------------------------------
+; READ_SCORE
+; Reads a decimal number from keyboard (up to 3 digits).
+; Converts ASCII characters to integer value.
+; Clamps result to 100 if overflow.
+; Returns: R0 = score entered
+; ---------------------------------------------------------
+
+READ_SCORE 	ADD 	R6, R6, #-1		; PUSH R7, R2, R3, R4 onto stack
+		STR	R7, R6, #0
+		ADD 	R6, R6, #-1
+		STR 	R2, R6,	#0
+		ADD 	R6, R6, #-1
+		STR 	R3, R6, #0
+		ADD 	R6, R6, #-1
+		STR 	R4, R6, #0
+
+		AND 	R2, R2, #0		; R2 = Running Total
+
+RS_LOOP		GETC				; GET ONE CHARACTER (do NOT echo yet)
+
+		; check if user pressed Enter (end of input)
+		LD 	R3, NEWLINE
+		NOT 	R3, R3
+		ADD 	R3, R3, #1
+		ADD	R3, R0, R3
+		BRz 	RS_CLAMP		; Enter pressed, go clamp
+
+RS_DIGIT	; convert ASCII to digit: subtract 48 ('0')
+		LD 	R3, NEG48
+		ADD 	R3, R0, R3		; R3 = char - 48 (the digit value)
+		BRn 	RS_LOOP			; below '0' -> not a digit, skip
+		LD 	R5, NEG9
+		ADD 	R5, R3, R5		; digit - 9
+		BRp	RS_LOOP			; above '9' -> not a digit, skip
+
+		OUT				; valid digit: echo it now
+		; multiply running total by 10 then add new digit
+		; R2 * 10 = (R2 * 8) + (R2 * 2)
+		ADD 	R4, R2, R2		; 2x
+		ADD	R4, R4, R4		; 4x
+		ADD	R4, R4, R4		; 8x
+		ADD 	R4, R4, R2		; 9x
+		ADD 	R4, R4, R2		; 10x
+		ADD 	R2, R4, R3		; total = (total * 10) + digit
+		BRnzp	RS_LOOP
+
+		; Enter was pressed: echo a newline so the next prompt
+		; starts on its own line, then clamp value to 100 max
+RS_CLAMP	LD	R0, NEWLINE		; move cursor to next line
+		OUT
+		LD 	R3, NEG100
+		ADD 	R3, R2, R3		; total - 100
+		BRnz	RS_DONE			; <= 100, fine
+		LD  	R2, HUNDRED		; otherwise cap at 100
+
+
+RS_DONE		ADD 	R0, R2, #0		; put result in R0 for return
+
+		LDR 	R4, R6, #0		; pop R4, R3, R2, R7
+		ADD 	R6, R6, #1
+		LDR 	R3, R6, #0
+		ADD	R6, R6, #1
+		LDR 	R2, R6, #0
+		ADD 	R6, R6, #1
+		LDR 	R7, R6, #0
+		ADD 	R6, R6, #1
+		RET
+
+; -------------------------------------------------------------
+; CALC_STATS
+;   Walks the SCORES array using a pointer.
+;   Finds minimum, Maximum, and computes average.
+;   Stores results in MINV, MAXV, AVGV.
+; -------------------------------------------------------------
+
+CALC_STATS	ADD 	R6, R6, #-1
+		STR  	R7, R6, #0
+		ADD 	R6, R6, #-1
+		STR 	R0, R6, #0
+		ADD 	R6, R6, #-1
+		STR 	R1, R6, #0
+		ADD 	R6, R6, #-1
+		STR 	R2, R6, #0
+		ADD	R6, R6, #-1
+		STR 	R3, R6, #0
+		ADD	R6, R6, #-1
+		STR	R4, R6, #0
+
+
+		LEA 	R1, SCORES
+		LDR	R0, R1, #0		; seed min, max, sum with first score
+
+		ST	R0, MINV
+		ST	R0, MAXV
+		AND 	R4, R4, #0
+		ADD 	R4, R4, R0		; seed sum with first score
+		ADD 	R1, R1, #1		; advance pointer past first score
+		LD 	R2, FIVE
+		ADD 	R2, R2, #-1		; 4 iterations left
+
+CS_LOOP		BRz	CS_AVG
+
+		LDR	R0, R1, #0		; load score at current pointer
+
+		; check for new minimum
+		LD 	R3, MINV
+		NOT	R3, R3
+		ADD 	R3, R3, #1
+		ADD 	R3, R0, R3		; current - min
+		BRzp	CS_MAXCHK		; current >= min, skip
+		ST	R0, MINV
+
+CS_MAXCHK	; check for maximum
+		LD 	R3, MAXV
+		NOT 	R3, R3
+		ADD 	R3, R3, #1
+		ADD	R3, R0, R3		; current - max
+		BRnz	CS_SUM
+		ST	R0, MAXV
+
+CS_SUM		ADD 	R4, R4, R0		; add to running sum
+		ADD 	R1, R1, #1		; advance pointer
+		ADD 	R2, R2, #-1
+		BRnzp 	CS_LOOP
+
+
+		; compute average by dividing sum by 5 (repeated subtraction)
+CS_AVG		AND 	R0, R0, #0		; R0 = quotient
+		LD 	R3, NEG5
+
+CS_DIV		ADD 	R4, R4, R3		; sum -= 5
+		BRn 	CS_DONE
+		ADD	R0, R0, #1
+		BRnzp	CS_DIV
+
+CS_DONE		ST	R0, AVGV
+
+
+		LDR	R4, R6, #0
+		ADD 	R6, R6, #1
+		LDR	R3, R6, #0
+		ADD 	R6, R6, #1
+		LDR 	R2, R6, #0
+		ADD 	R6, R6, #1
+		LDR 	R1, R6, #0
+		ADD 	R6, R6, #1
+		LDR	R0, R6, #0
+		ADD	R6, R6, #1
+		LDR 	R7, R6, #0
+		ADD 	R6, R6, #1
+		RET
+
+
+; -------------------------------------------------------------
+; PRINT_RESULTS
+;	Prints min, max, and average scores with letter grades.
+; -------------------------------------------------------------
+
+PRINT_RESULTS
+	ADD 	R6, R6, #-1
+	STR 	R7, R6, #0
+
+	LEA	R0, MSG_MIN
+	PUTS
+	LD	R0, MINV
+	JSR	PRINT_NUM
+	LEA 	R0, MSG_GRADE
+	PUTS
+	LD	R0, MINV
+	JSR	PRINT_GRADE
+
+	LEA 	R0, MSG_MAX
+	PUTS
+	LD 	R0, MAXV
+	JSR 	PRINT_NUM
+	LEA 	R0, MSG_GRADE
+	PUTS
+	LD	R0, MAXV
+	JSR	PRINT_GRADE
+
+	LEA	R0, MSG_AVG
+	PUTS
+	LD	R0, AVGV
+	JSR	PRINT_NUM
+	LEA	R0, MSG_GRADE
+	PUTS
+	LD	R0, AVGV
+	JSR 	PRINT_GRADE
+
+	LDR	R7, R6, #0
+	ADD	R6, R6, #1
+	RET
+
+
+; -----------------------------------------
+; Data Section
+;------------------------------------------
+
+; constants
+STACK		.FILL xFDFF
+FIVE		.FILL #5
+NEG5		.FILL #-5
+NEG10		.FILL #-10
+HUNDRED		.FILL #100
+NEG100		.FILL #-100
+NEG48		.FILL #-48
+NEG9		.FILL #-9
+ASCII0		.FILL x0030
+NEWLINE 	.FILL x000A
+
+; grade thresholds
+T90		.FILL #90
+T80		.FILL #80
+T70		.FILL #70
+T60		.FILL #60
+
+; letter grade ASCII codes
+LETTERA 	.FILL x0041
+LETTERB		.FILL x0042
+LETTERC		.FILL x0043
+LETTERD		.FILL x0044
+LETTERF		.FILL x0046
+
+; working variables
+SPTR		.FILL #0
+CTR		.FILL #0
+MINV		.FILL #0
+MAXV		.FILL #0
+AVGV		.FILL #0
+
+; score storage (array of 5)
+SCORES		.BLKW	5
+
+; output strings
+PROMPT		.STRINGZ "Enter Score: "
+MSG_MIN		.STRINGZ "\nMinimum:  "
+MSG_MAX		.STRINGZ "\nMaximum:  "
+MSG_AVG		.STRINGZ "\nAverage:  "
+MSG_GRADE	.STRINGZ "  Grade:  "
+
+
+; --------------------------------------------------------------
+; PRINT_NUM
+;  	Converts integer in R0 to ASCII and prints it.
+; 	Uses Stack to reverse digit order before printing.
+; --------------------------------------------------------------
+
+PRINT_NUM	ADD 	R6, R6, #-1
+		STR	R7, R6, #0
+		ADD 	R6, R6, #-1
+		STR	R1, R6, #0
+		ADD 	R6, R6, #-1
+		STR	R2, R6, #0
+		ADD 	R6, R6, #-1
+		STR	R3, R6, #0
+		ADD	R6, R6, #-1
+		STR 	R4, R6, #0
+
+
+		AND 	R2, R2, #0		; R2 = digit count
+		ADD 	R1, R0, #0
+
+		BRnp	PN_EXTRACT
+		LD	R0, ASCII0		; special case: value is 0
+		OUT
+		BRnzp	PN_DONE
+
+		;extract digits right-to-left, push each onto stack
+PN_EXTRACT 	ADD 	R1, R1, #0
+		BRz	PN_PRINT
+
+		AND 	R3, R3, #0		; quotient = 0
+		LD	R4, NEG10
+
+PN_DIV		ADD	R0, R1, R4		; R1 - 10
+		BRn	PN_PUSH
+		ADD 	R1, R0, #0
+		ADD 	R3, R3, #1
+		BRnzp	PN_DIV
+
+PN_PUSH		LD	R0, ASCII0
+		ADD	R0, R0, R1		; remainder + '0' = ASCII digit
+		ADD	R6, R6, #-1
+		STR	R0, R6, #0		; push digit
+		ADD 	R2, R2, #1
+		ADD	R1, R3, #0		; quotient becomes next dividend
+		BRnzp	PN_EXTRACT
+
+
+		; pop digits off stack and print (now in correct order)
+PN_PRINT 	ADD	R2, R2, #0
+		BRz	PN_DONE
+PN_POP		LDR	R0, R6, #0
+		ADD 	R6, R6, #1
+		OUT
+		ADD 	R2, R2, #-1
+		BRp	PN_POP
+
+PN_DONE		LDR 	R4, R6, #0
+		ADD 	R6, R6, #1
+		LDR	R3, R6, #0
+		ADD 	R6, R6, #1
+		LDR	R2, R6, #0
+		ADD	R6, R6, #1
+		LDR	R1, R6, #0
+		ADD	R6, R6, #1
+		LDR	R7, R6, #0
+		ADD 	R6, R6, #1
+		RET
+
+
+; ------------------------------------------------------------
+; PRINT_GRADE
+; Prints the letter grade for the score in R0
+; ------------------------------------------------------------
+
+PRINT_GRADE 	ADD	R6, R6, #-1
+		STR	R7, R6, #0
+		ADD	R6, R6, #-1
+		STR	R1, R6, #0
+		ADD 	R6, R6, #-1
+		STR	R2, R6, #0
+
+		LD 	R1, T90
+		NOT	R2, R1
+		ADD 	R2, R2, #1
+		ADD 	R2, R0, R2
+		BRn	PG_B
+		LD	R0, LETTERA
+		OUT
+		BRnzp	PG_DONE
+
+PG_B		LD	R1, T80
+		NOT	R2, R1
+		ADD 	R2, R2, #1
+		ADD	R2, R0, R2
+		BRn	PG_C
+		LD 	R0, LETTERB
+		OUT
+		BRnzp	PG_DONE
+
+PG_C		LD	R1, T70
+		NOT	R2, R1
+		ADD  	R2, R2, #1
+		ADD  	R2, R0, R2
+		BRn 	PG_D
+		LD	R0, LETTERC
+		OUT
+		BRnzp	PG_DONE
+
+PG_D		LD	R1, T60
+		NOT	R2, R1
+		ADD 	R2, R2, #1
+		ADD 	R2, R0, R2
+		BRn 	PG_F
+		LD	R0, LETTERD
+		OUT
+		BRnzp	PG_DONE
+
+
+PG_F		LD	R0, LETTERF
+		OUT
+
+PG_DONE		LDR	R2, R6, #0
+		ADD 	R6, R6, #1
+		LDR	R1, R6, #0
+		ADD	R6, R6, #1
+		LDR	R7, R6, #0
+		ADD 	R6, R6, #1
+		RET
+
+	.END
